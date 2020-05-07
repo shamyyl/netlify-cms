@@ -300,6 +300,18 @@ export function discardDraft() {
 }
 
 export function changeDraftField(
+  field: EntryField,
+  value: string,
+  metadata: Record<string, unknown>,
+  entries: EntryMap[],
+) {
+  return {
+    type: DRAFT_CHANGE_FIELD,
+    payload: { field, value, metadata, entries },
+  };
+}
+
+export function changeDraftMeta(
   field: string,
   value: string,
   metadata: Record<string, unknown>,
@@ -614,7 +626,8 @@ export function createEmptyDraft(collection: Collection, search: string) {
     });
 
     const fields = collection.get('fields', List());
-    const dataFields = createEmptyDraftData(fields);
+    const dataFields = createEmptyDraftData(fields.filter(f => !f!.get('meta')).toList());
+    const metaFields = createEmptyDraftData(fields.filter(f => f!.get('meta') === true).toList());
 
     const state = getState();
     const backend = currentBackend(state.config);
@@ -626,6 +639,8 @@ export function createEmptyDraft(collection: Collection, search: string) {
     let newEntry = createEntry(collection.get('name'), '', '', {
       data: dataFields,
       mediaFiles: [],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      meta: metaFields as any,
     });
     newEntry = await backend.processEntry(state, collection, newEntry);
     dispatch(emptyDraftCreated(newEntry));
