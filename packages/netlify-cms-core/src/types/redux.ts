@@ -141,6 +141,14 @@ type NestedObject = { depth: number };
 
 type Nested = StaticallyTypedRecord<NestedObject>;
 
+type PathObject = { label: string; widget: string; index_file: string };
+
+type MetaObject = {
+  path?: StaticallyTypedRecord<PathObject>;
+};
+
+type Meta = StaticallyTypedRecord<MetaObject>;
+
 type CollectionObject = {
   name: string;
   folder?: string;
@@ -165,6 +173,7 @@ type CollectionObject = {
   label: string;
   sortableFields: List<string>;
   nested?: Nested;
+  meta?: Meta;
 };
 
 export type Collection = StaticallyTypedRecord<CollectionObject>;
