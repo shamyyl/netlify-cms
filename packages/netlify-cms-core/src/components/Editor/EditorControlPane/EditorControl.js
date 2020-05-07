@@ -272,7 +272,9 @@ class EditorControl extends React.Component {
 }
 
 const mapStateToProps = state => {
-  const { collections } = state;
+  const { collections, entryDraft } = state;
+  const entry = entryDraft.get('entry');
+  const collection = collections.get(entryDraft.getIn(['entry', 'collection']));
   const isLoadingAsset = selectIsLoadingAsset(state.medias);
 
   const loadEntry = async (collectionName, slug) => {
@@ -292,6 +294,8 @@ const mapStateToProps = state => {
     config: state.config,
     isLoadingAsset,
     loadEntry,
+    entry,
+    collection,
   };
 };
 
