@@ -293,9 +293,9 @@ const mapStateToProps = state => {
     queryHits: state.search.get('queryHits'),
     config: state.config,
     isLoadingAsset,
-    loadEntry,
     entry,
     collection,
+    loadEntry,
   };
 };
 
@@ -324,7 +324,7 @@ const mergeProps = (stateProps, dispatchProps, ownProps) => {
     ...stateProps,
     ...dispatchProps,
     ...ownProps,
-    boundGetAsset: dispatchProps.boundGetAsset(ownProps.collection, stateProps.entry),
+    boundGetAsset: dispatchProps.boundGetAsset(stateProps.collection, stateProps.entry),
   };
 };
 

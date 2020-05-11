@@ -39,7 +39,7 @@ function assertNotification(message) {
 }
 
 function exitEditor() {
-  cy.contains('a[href^="#/collections/"]', 'Writing in').click();
+  cy.contains('a', 'Writing in').click();
 }
 
 function goToWorkflow() {
