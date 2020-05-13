@@ -20,6 +20,7 @@ import {
   removeMediaControl,
 } from 'Actions/mediaLibrary';
 import Widget from './Widget';
+import { validateMetaField } from '../../../actions/entries';
 
 /**
  * This is a necessary bridge as we are still passing classnames to widgets
@@ -156,6 +157,7 @@ class EditorControl extends React.Component {
       isEditorComponent,
       isNewEditorComponent,
       t,
+      validateMetaField,
     } = this.props;
 
     const widgetName = field.get('widget');
@@ -258,6 +260,7 @@ class EditorControl extends React.Component {
               isEditorComponent={isEditorComponent}
               isNewEditorComponent={isNewEditorComponent}
               t={t}
+              validateMetaField={validateMetaField}
             />
             {fieldHint && (
               <ControlHint active={isSelected || this.state.styleActive} error={!!errors}>
@@ -296,6 +299,7 @@ const mapStateToProps = state => {
     entry,
     collection,
     loadEntry,
+    validateMetaField: (field, value) => validateMetaField(state, collection, field, value),
   };
 };
 
