@@ -64,12 +64,17 @@ export type SortMap = OrderedMap<string, StaticallyTypedRecord<SortObject>>;
 
 export type Sort = Map<string, SortMap>;
 
+export type FilterMap = StaticallyTypedRecord<ViewFilter & { active: boolean }>;
+
+export type Filter = Map<string, Map<string, FilterMap>>; // collection.field.active
+
 export type Entities = StaticallyTypedRecord<EntitiesObject>;
 
 export type Entries = StaticallyTypedRecord<{
   pages: Pages & PagesObject;
   entities: Entities & EntitiesObject;
   sort: Sort;
+  filter: Filter;
 }>;
 
 export type Deploys = StaticallyTypedRecord<{}>;
@@ -88,9 +93,10 @@ export type EntryObject = {
   collection: string;
   mediaFiles: List<MediaFileMap>;
   newRecord: boolean;
-  metaData: { status: string };
   author?: string;
   updatedOn?: string;
+  status: string;
+  meta: StaticallyTypedRecord<{ path: string }>;
 };
 
 export type EntryMap = StaticallyTypedRecord<EntryObject>;
@@ -102,6 +108,7 @@ export type FieldsErrors = StaticallyTypedRecord<{ [field: string]: { type: stri
 export type EntryDraft = StaticallyTypedRecord<{
   entry: Entry;
   fieldsErrors: FieldsErrors;
+  fieldsMetaData?: Map<string, Map<string, string>>;
 }>;
 
 export type EntryField = StaticallyTypedRecord<{
@@ -114,6 +121,7 @@ export type EntryField = StaticallyTypedRecord<{
   media_folder?: string;
   public_folder?: string;
   comment?: string;
+  meta?: boolean;
 }>;
 
 export type EntryFields = List<EntryField>;
@@ -133,6 +141,24 @@ export type CollectionFile = StaticallyTypedRecord<{
 }>;
 
 export type CollectionFiles = List<CollectionFile>;
+
+export type ViewFilter = {
+  label: string;
+  field: string;
+  pattern: string;
+  id: string;
+};
+type NestedObject = { depth: number };
+
+type Nested = StaticallyTypedRecord<NestedObject>;
+
+type PathObject = { label: string; widget: string; index_file: string };
+
+type MetaObject = {
+  path?: StaticallyTypedRecord<PathObject>;
+};
+
+type Meta = StaticallyTypedRecord<MetaObject>;
 
 type CollectionObject = {
   name: string;
@@ -157,6 +183,9 @@ type CollectionObject = {
   label_singular?: string;
   label: string;
   sortableFields: List<string>;
+  view_filters: List<StaticallyTypedRecord<ViewFilter>>;
+  nested?: Nested;
+  meta?: Meta;
 };
 
 export type Collection = StaticallyTypedRecord<CollectionObject>;
@@ -222,10 +251,16 @@ export type Search = StaticallyTypedRecord<{
   entryIds?: SearchItem[];
   isFetching: boolean;
   term: string | null;
+  collections: List<string> | null;
   page: number;
 }>;
 
 export type Cursors = StaticallyTypedRecord<{}>;
+
+export type Status = StaticallyTypedRecord<{
+  isFetching: boolean;
+  status: StaticallyTypedRecord<{ auth: boolean }>;
+}>;
 
 export interface State {
   config: Config;
@@ -239,6 +274,8 @@ export interface State {
   medias: Medias;
   mediaLibrary: MediaLibrary;
   search: Search;
+  notifs: { message: { key: string }; kind: string; id: number }[];
+  status: Status;
 }
 
 export interface MediasAction extends Action<string> {
@@ -296,12 +333,23 @@ export interface EntriesSortRequestPayload extends EntryPayload {
   direction: string;
 }
 
-export interface EntriesSortSuccessPayload extends EntriesSortRequestPayload {
-  entries: EntryObject[];
-}
-
 export interface EntriesSortFailurePayload extends EntriesSortRequestPayload {
   error: Error;
+}
+
+export interface EntriesFilterRequestPayload {
+  filter: ViewFilter;
+  collection: string;
+}
+
+export interface EntriesFilterFailurePayload {
+  filter: ViewFilter;
+  collection: string;
+  error: Error;
+}
+
+export interface EntriesMoveSuccessPayload extends EntryPayload {
+  entries: EntryObject[];
 }
 
 export interface EntriesAction extends Action<string> {

@@ -3,6 +3,71 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## 2.8.3 (2020-07-27)
+
+
+### Reverts
+
+* Revert "chore(release): publish" ([118d50a](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-relation/commit/118d50a7a70295f25073e564b5161aa2b9883056))
+
+
+
+
+
+## [2.8.2](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-relation/compare/netlify-cms-widget-relation@2.8.1...netlify-cms-widget-relation@2.8.2) (2020-07-16)
+
+
+### Bug Fixes
+
+* **widget-relation:** append initial value search to options ([#4026](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-relation/issues/4026)) ([12c388e](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-relation/commit/12c388eff3795bf1f4475b1d7c3b61f8569c3b31))
+
+
+
+
+
+## [2.8.1](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-relation/compare/netlify-cms-widget-relation@2.8.0...netlify-cms-widget-relation@2.8.1) (2020-07-14)
+
+
+### Bug Fixes
+
+* relation widget performance ([#3975](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-relation/issues/3975)) ([c7e0fe8](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-relation/commit/c7e0fe8492d09a3d151c608f50da844f421362ed))
+
+
+
+
+
+# [2.8.0](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-relation/compare/netlify-cms-widget-relation@2.7.0...netlify-cms-widget-relation@2.8.0) (2020-06-18)
+
+
+### Bug Fixes
+
+* **widget-relation:** keep referenced field type when not using template ([#3850](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-relation/issues/3850)) ([1419ba1](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-relation/commit/1419ba1d09ba1671f964f797479e1da5073a608d))
+
+
+### Features
+
+* add widgets schema validation ([#3841](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-relation/issues/3841)) ([2b46608](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-relation/commit/2b46608f86d22c8ad34f75e396be7c34462d9e99))
+
+
+
+
+
+# [2.7.0](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-relation/compare/netlify-cms-widget-relation@2.6.0...netlify-cms-widget-relation@2.7.0) (2020-05-19)
+
+
+### Bug Fixes
+
+* **widget-relation:** fix displayFields default ([#3783](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-relation/issues/3783)) ([24d96a7](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-relation/commit/24d96a760a26f043468cd3e7af28ad3adc6c283a))
+
+
+### Features
+
+* **widget-relation:** target file collections ([#3754](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-relation/issues/3754)) ([2f435f8](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-relation/commit/2f435f875bc139af345080eb8cca6146d27c10f6))
+
+
+
+
+
 # [2.6.0](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-relation/compare/netlify-cms-widget-relation@2.5.2...netlify-cms-widget-relation@2.6.0) (2020-05-04)
 
 

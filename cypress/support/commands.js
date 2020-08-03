@@ -34,8 +34,8 @@ const matchRoute = (route, fetchArgs) => {
   const options = fetchArgs[1];
 
   const method = options && options.method ? options.method : 'GET';
-  let body = options && options.body;
-  let routeBody = route.body;
+  const body = options && options.body;
+  const routeBody = route.body;
 
   let bodyMatch = false;
   if (routeBody?.encoding === 'base64' && ['File', 'Blob'].includes(body?.constructor.name)) {
@@ -268,6 +268,7 @@ Cypress.Commands.add('insertEditorComponent', title => {
   ['clickCodeButton', 'Code'],
   ['clickItalicButton', 'Italic'],
   ['clickQuoteButton', 'Quote'],
+  ['clickLinkButton', 'Link'],
 ].forEach(([commandName, toolbarButtonName]) => {
   Cypress.Commands.add(commandName, opts => {
     return cy.clickToolbarButton(toolbarButtonName, opts);
@@ -275,9 +276,11 @@ Cypress.Commands.add('insertEditorComponent', title => {
 });
 
 Cypress.Commands.add('clickModeToggle', () => {
-  cy.get('button[role="switch"]')
-    .click()
-    .focused();
+  cy.get('.cms-editor-visual').within(() => {
+    cy.get('button[role="switch"]')
+      .click()
+      .focused();
+  });
 });
 
 [['insertCodeBlock', 'Code Block']].forEach(([commandName, componentTitle]) => {
@@ -312,6 +315,12 @@ Cypress.Commands.add('clearMarkdownEditorContent', () => {
     .getMarkdownEditor()
     .selectAll()
     .backspace({ times: 2 });
+});
+
+Cypress.Commands.add('confirmRawEditorContent', expectedDomString => {
+  cy.get('.cms-editor-raw').within(() => {
+    cy.contains('span', expectedDomString);
+  });
 });
 
 function toPlainTree(domString) {

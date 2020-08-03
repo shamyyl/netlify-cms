@@ -25,10 +25,12 @@ import {
   requestWithBackoff,
   readFileMetadata,
   FetchError,
+  throwOnConflictingBranches,
 } from 'netlify-cms-lib-util';
 import { Base64 } from 'js-base64';
 import { Map } from 'immutable';
 import { flow, partial, result, trimStart } from 'lodash';
+import { dirname } from 'path';
 
 export const API_NAME = 'GitLab';
 
@@ -56,6 +58,7 @@ enum CommitAction {
 type CommitItem = {
   base64Content?: string;
   path: string;
+  oldPath?: string;
   action: CommitAction;
 };
 
@@ -67,6 +70,7 @@ interface CommitsParams {
   actions?: {
     action: string;
     file_path: string;
+    previous_path?: string;
     content?: string;
     encoding?: string;
   }[];
@@ -385,14 +389,14 @@ export default class API {
     };
   };
 
-  listAllFiles = async (path: string, recursive = false) => {
+  listAllFiles = async (path: string, recursive = false, branch = this.branch) => {
     const entries = [];
     // eslint-disable-next-line prefer-const
     let { cursor, entries: initialEntries } = await this.fetchCursorAndEntries({
       url: `${this.repoURL}/repository/tree`,
       // Get the maximum number of entries per page
       // eslint-disable-next-line @typescript-eslint/camelcase
-      params: { path, ref: this.branch, per_page: 100, recursive },
+      params: { path, ref: branch, per_page: 100, recursive },
     });
     entries.push(...initialEntries);
     while (cursor && cursor.actions!.has('next')) {
@@ -407,7 +411,14 @@ export default class API {
   toBase64 = (str: string) => Promise.resolve(Base64.encode(str));
   fromBase64 = (str: string) => Base64.decode(str);
 
-  uploadAndCommit(
+  async getBranch(branchName: string) {
+    const branch: GitLabBranch = await this.requestJSON(
+      `${this.repoURL}/repository/branches/${encodeURIComponent(branchName)}`,
+    );
+    return branch;
+  }
+
+  async uploadAndCommit(
     items: CommitItem[],
     { commitMessage = '', branch = this.branch, newBranch = false },
   ) {
@@ -415,7 +426,11 @@ export default class API {
       action: item.action,
       // eslint-disable-next-line @typescript-eslint/camelcase
       file_path: item.path,
-      ...(item.base64Content ? { content: item.base64Content, encoding: 'base64' } : {}),
+      // eslint-disable-next-line @typescript-eslint/camelcase
+      ...(item.oldPath ? { previous_path: item.oldPath } : {}),
+      ...(item.base64Content !== undefined
+        ? { content: item.base64Content, encoding: 'base64' }
+        : {}),
     }));
 
     const commitParams: CommitsParams = {
@@ -434,29 +449,67 @@ export default class API {
       commitParams.author_email = email;
     }
 
-    return this.requestJSON({
-      url: `${this.repoURL}/repository/commits`,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      body: JSON.stringify(commitParams),
-    });
+    try {
+      const result = await this.requestJSON({
+        url: `${this.repoURL}/repository/commits`,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body: JSON.stringify(commitParams),
+      });
+      return result;
+    } catch (error) {
+      const message = error.message || '';
+      if (newBranch && message.includes(`Could not update ${branch}`)) {
+        await throwOnConflictingBranches(branch, name => this.getBranch(name), API_NAME);
+      }
+      throw error;
+    }
   }
 
-  async getCommitItems(files: (Entry | AssetProxy)[], branch: string) {
-    const items = await Promise.all(
+  async getCommitItems(files: { path: string; newPath?: string }[], branch: string) {
+    const items: CommitItem[] = await Promise.all(
       files.map(async file => {
         const [base64Content, fileExists] = await Promise.all([
           result(file, 'toBase64', partial(this.toBase64, (file as Entry).raw)),
           this.isFileExists(file.path, branch),
         ]);
+
+        let action = CommitAction.CREATE;
+        let path = trimStart(file.path, '/');
+        let oldPath = undefined;
+        if (fileExists) {
+          oldPath = file.newPath && path;
+          action =
+            file.newPath && file.newPath !== oldPath ? CommitAction.MOVE : CommitAction.UPDATE;
+          path = file.newPath ? trimStart(file.newPath, '/') : path;
+        }
+
         return {
-          action: fileExists ? CommitAction.UPDATE : CommitAction.CREATE,
+          action,
           base64Content,
-          path: trimStart(file.path, '/'),
+          path,
+          oldPath,
         };
       }),
     );
-    return items as CommitItem[];
+
+    // move children
+    for (const item of items.filter(i => i.oldPath && i.action === CommitAction.MOVE)) {
+      const sourceDir = dirname(item.oldPath as string);
+      const destDir = dirname(item.path);
+      const children = await this.listAllFiles(sourceDir, true, branch);
+      children
+        .filter(f => f.path !== item.oldPath)
+        .forEach(file => {
+          items.push({
+            action: CommitAction.MOVE,
+            path: file.path.replace(sourceDir, destDir),
+            oldPath: file.path,
+          });
+        });
+    }
+
+    return items;
   }
 
   async persistFiles(entry: Entry | null, mediaFiles: AssetProxy[], options: PersistOptions) {
@@ -587,54 +640,33 @@ export default class API {
         oldPath: d.old_path,
         newPath: d.new_path,
         newFile: d.new_file,
+        path: d.new_path || d.old_path,
         binary: d.diff.startsWith('Binary') || /.svg$/.test(d.new_path),
       };
     });
   }
 
-  async retrieveMetadata(contentKey: string) {
+  async retrieveUnpublishedEntryData(contentKey: string) {
     const { collection, slug } = parseContentKey(contentKey);
     const branch = branchFromContentKey(contentKey);
     const mergeRequest = await this.getBranchMergeRequest(branch);
-    const diff = await this.getDifferences(mergeRequest.sha);
-    const { oldPath: path, newFile: newFile } = diff.find(d => !d.binary) as {
-      oldPath: string;
-      newFile: boolean;
-    };
-    const mediaFiles = await Promise.all(
-      diff
-        .filter(d => d.oldPath !== path)
-        .map(async d => {
-          const path = d.newPath;
-          const id = await this.getFileId(path, branch);
-          return { path, id };
-        }),
+    const diffs = await this.getDifferences(mergeRequest.sha);
+    const diffsWithIds = await Promise.all(
+      diffs.map(async d => {
+        const { path, newFile } = d;
+        const id = await this.getFileId(path, branch);
+        return { id, path, newFile };
+      }),
     );
     const label = mergeRequest.labels.find(isCMSLabel) as string;
     const status = labelToStatus(label);
-    const timeStamp = mergeRequest.updated_at;
-    return { branch, collection, slug, path, status, newFile, mediaFiles, timeStamp };
-  }
-
-  async readUnpublishedBranchFile(contentKey: string) {
-    const {
-      branch,
+    const updatedAt = mergeRequest.updated_at;
+    return {
       collection,
       slug,
-      path,
       status,
-      newFile,
-      mediaFiles,
-      timeStamp,
-    } = await this.retrieveMetadata(contentKey);
-
-    const fileData = (await this.readFile(path, null, { branch })) as string;
-
-    return {
-      slug,
-      metaData: { branch, collection, objects: { entry: { path, mediaFiles } }, status, timeStamp },
-      fileData,
-      isModification: !newFile,
+      diffs: diffsWithIds,
+      updatedAt,
     };
   }
 
@@ -709,10 +741,9 @@ export default class API {
         this.getCommitItems(files, branch),
         this.getDifferences(branch),
       ]);
-
       // mark files for deletion
-      for (const diff of diffs) {
-        if (!items.some(item => item.path === diff.newPath)) {
+      for (const diff of diffs.filter(d => d.binary)) {
+        if (!items.some(item => item.path === diff.path)) {
           items.push({ action: CommitAction.DELETE, path: diff.newPath });
         }
       }
@@ -781,9 +812,7 @@ export default class API {
   }
 
   async getDefaultBranch() {
-    const branch: GitLabBranch = await this.requestJSON(
-      `${this.repoURL}/repository/branches/${encodeURIComponent(this.branch)}`,
-    );
+    const branch: GitLabBranch = await this.getBranch(this.branch);
     return branch;
   }
 
@@ -834,5 +863,12 @@ export default class API {
       // eslint-disable-next-line @typescript-eslint/camelcase
       target_url,
     }));
+  }
+
+  async getUnpublishedEntrySha(collection: string, slug: string) {
+    const contentKey = generateContentKey(collection, slug);
+    const branch = branchFromContentKey(contentKey);
+    const mergeRequest = await this.getBranchMergeRequest(branch);
+    return mergeRequest.sha;
   }
 }

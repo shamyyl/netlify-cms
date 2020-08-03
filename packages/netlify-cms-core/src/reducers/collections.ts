@@ -1,4 +1,4 @@
-import { List } from 'immutable';
+import { List, Set } from 'immutable';
 import { get, escapeRegExp } from 'lodash';
 import consoleError from '../lib/consoleError';
 import { CONFIG_SUCCESS } from '../actions/config';
@@ -12,6 +12,7 @@ import {
   EntryField,
   State,
   EntryMap,
+  ViewFilter,
 } from '../types/redux';
 import { selectMediaFolder } from './entries';
 import { stringTemplate } from 'netlify-cms-lib-widgets';
@@ -178,7 +179,7 @@ export const selectMediaFolders = (state: State, collection: Collection, entry: 
     folders.unshift(selectMediaFolder(state.config, collection, entry, undefined));
   }
 
-  return folders;
+  return Set(folders).toArray();
 };
 
 export const selectFields = (collection: Collection, slug: string) =>
@@ -423,6 +424,11 @@ export const selectSortDataPath = (collection: Collection, key: string) => {
   }
 };
 
+export const selectViewFilters = (collection: Collection) => {
+  const viewFilters = collection.get('view_filters').toJS() as ViewFilter[];
+  return viewFilters;
+};
+
 export const selectFieldsComments = (collection: Collection, entryMap: EntryMap) => {
   let fields: EntryField[] = [];
   if (collection.has('folder')) {
@@ -441,6 +447,15 @@ export const selectFieldsComments = (collection: Collection, entryMap: EntryMap)
   });
 
   return comments;
+};
+
+export const selectHasMetaPath = (collection: Collection) => {
+  return (
+    collection.has('folder') &&
+    collection.get('type') === FOLDER &&
+    collection.has('meta') &&
+    collection.get('meta')?.has('path')
+  );
 };
 
 export default collections;

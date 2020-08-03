@@ -1,11 +1,11 @@
 import { fromJS, List, Map, Set } from 'immutable';
-import { isEqual, orderBy } from 'lodash';
+import { isEqual } from 'lodash';
 import { actions as notifActions } from 'redux-notifications';
 import { serializeValues } from '../lib/serializeEntryValues';
 import { currentBackend, Backend } from '../backend';
 import { getIntegrationProvider } from '../integrations';
 import { selectIntegration, selectPublishedSlugs } from '../reducers';
-import { selectFields, updateFieldByKey, selectSortDataPath } from '../reducers/collections';
+import { selectFields, updateFieldByKey } from '../reducers/collections';
 import { selectCollectionEntriesCursor } from '../reducers/cursors';
 import { Cursor, ImplementationMediaFile } from 'netlify-cms-lib-util';
 import { createEntry, EntryValue } from '../valueObjects/Entry';
@@ -19,13 +19,17 @@ import {
   EntryFields,
   EntryField,
   SortDirection,
+  ViewFilter,
 } from '../types/redux';
 
 import { ThunkDispatch } from 'redux-thunk';
 import { AnyAction } from 'redux';
 import { waitForMediaLibraryToLoad, loadMedia } from './mediaLibrary';
 import { waitUntil } from './waitUntil';
-import { selectIsFetching, selectEntriesSortFields } from '../reducers/entries';
+import { selectIsFetching, selectEntriesSortFields, selectEntryByPath } from '../reducers/entries';
+import { selectCustomPath } from '../reducers/entryDraft';
+import { navigateToEntry } from '../routing/history';
+import { getProcessSegment } from '../lib/formatters';
 
 const { notifSend } = notifActions;
 
@@ -43,6 +47,10 @@ export const ENTRIES_FAILURE = 'ENTRIES_FAILURE';
 export const SORT_ENTRIES_REQUEST = 'SORT_ENTRIES_REQUEST';
 export const SORT_ENTRIES_SUCCESS = 'SORT_ENTRIES_SUCCESS';
 export const SORT_ENTRIES_FAILURE = 'SORT_ENTRIES_FAILURE';
+
+export const FILTER_ENTRIES_REQUEST = 'FILTER_ENTRIES_REQUEST';
+export const FILTER_ENTRIES_SUCCESS = 'FILTER_ENTRIES_SUCCESS';
+export const FILTER_ENTRIES_FAILURE = 'FILTER_ENTRIES_FAILURE';
 
 export const DRAFT_CREATE_FROM_ENTRY = 'DRAFT_CREATE_FROM_ENTRY';
 export const DRAFT_CREATE_EMPTY = 'DRAFT_CREATE_EMPTY';
@@ -137,6 +145,16 @@ export function entriesFailed(collection: Collection, error: Error) {
   };
 }
 
+const getAllEntries = async (state: State, collection: Collection) => {
+  const backend = currentBackend(state.config);
+  const integration = selectIntegration(state, collection.get('name'), 'listEntries');
+  const provider: Backend = integration
+    ? getIntegrationProvider(state.integrations, backend.getToken, integration)
+    : backend;
+  const entries = await provider.listAllEntries(collection);
+  return entries;
+};
+
 export function sortByField(
   collection: Collection,
   key: string,
@@ -144,8 +162,6 @@ export function sortByField(
 ) {
   return async (dispatch: ThunkDispatch<State, {}, AnyAction>, getState: () => State) => {
     const state = getState();
-    const backend = currentBackend(state.config);
-
     // if we're already fetching we update the sort key, but skip loading entries
     const isFetching = selectIsFetching(state.entries, collection.get('name'));
     dispatch({
@@ -161,22 +177,7 @@ export function sortByField(
     }
 
     try {
-      const integration = selectIntegration(state, collection.get('name'), 'listEntries');
-      const provider: Backend = integration
-        ? getIntegrationProvider(state.integrations, backend.getToken, integration)
-        : backend;
-
-      let entries = await provider.listAllEntries(collection);
-
-      const sortFields = selectEntriesSortFields(getState().entries, collection.get('name'));
-      if (sortFields && sortFields.length > 0) {
-        const keys = sortFields.map(v => selectSortDataPath(collection, v.get('key')));
-        const orders = sortFields.map(v =>
-          v.get('direction') === SortDirection.Ascending ? 'asc' : 'desc',
-        );
-        entries = orderBy(entries, keys, orders);
-      }
-
+      const entries = await getAllEntries(state, collection);
       dispatch({
         type: SORT_ENTRIES_SUCCESS,
         payload: {
@@ -193,6 +194,45 @@ export function sortByField(
           collection: collection.get('name'),
           key,
           direction,
+          error,
+        },
+      });
+    }
+  };
+}
+
+export function filterByField(collection: Collection, filter: ViewFilter) {
+  return async (dispatch: ThunkDispatch<State, {}, AnyAction>, getState: () => State) => {
+    const state = getState();
+    // if we're already fetching we update the filter key, but skip loading entries
+    const isFetching = selectIsFetching(state.entries, collection.get('name'));
+    dispatch({
+      type: FILTER_ENTRIES_REQUEST,
+      payload: {
+        collection: collection.get('name'),
+        filter,
+      },
+    });
+    if (isFetching) {
+      return;
+    }
+
+    try {
+      const entries = await getAllEntries(state, collection);
+      dispatch({
+        type: FILTER_ENTRIES_SUCCESS,
+        payload: {
+          collection: collection.get('name'),
+          filter,
+          entries,
+        },
+      });
+    } catch (error) {
+      dispatch({
+        type: FILTER_ENTRIES_FAILURE,
+        payload: {
+          collection: collection.get('name'),
+          filter,
           error,
         },
       });
@@ -299,7 +339,7 @@ export function discardDraft() {
 }
 
 export function changeDraftField(
-  field: string,
+  field: EntryField,
   value: string,
   metadata: Record<string, unknown>,
   entries: EntryMap[],
@@ -312,7 +352,7 @@ export function changeDraftField(
 
 export function changeDraftFieldValidation(
   uniquefieldId: string,
-  errors: { type: string; message: string }[],
+  errors: { type: string; parentIds: string[]; message: string }[],
 ) {
   return {
     type: DRAFT_VALIDATION_ERRORS,
@@ -483,7 +523,10 @@ export function loadEntries(collection: Collection, page = 0) {
         cursor: Cursor;
         pagination: number;
         entries: EntryValue[];
-      } = await provider.listEntries(collection, page);
+      } = await (collection.has('nested')
+        ? // nested collections require all entries to construct the tree
+          provider.listAllEntries(collection).then((entries: EntryValue[]) => ({ entries }))
+        : provider.listEntries(collection, page));
       response = {
         ...response,
         // The only existing backend using the pagination system is the
@@ -610,7 +653,8 @@ export function createEmptyDraft(collection: Collection, search: string) {
     });
 
     const fields = collection.get('fields', List());
-    const dataFields = createEmptyDraftData(fields);
+    const dataFields = createEmptyDraftData(fields.filter(f => !f!.get('meta')).toList());
+    const metaFields = createEmptyDraftData(fields.filter(f => f!.get('meta') === true).toList());
 
     const state = getState();
     const backend = currentBackend(state.config);
@@ -622,6 +666,8 @@ export function createEmptyDraft(collection: Collection, search: string) {
     let newEntry = createEntry(collection.get('name'), '', '', {
       data: dataFields,
       mediaFiles: [],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      meta: metaFields as any,
     });
     newEntry = await backend.processEntry(state, collection, newEntry);
     dispatch(emptyDraftCreated(newEntry));
@@ -754,7 +800,7 @@ export function persistEntry(collection: Collection) {
         assetProxies,
         usedSlugs,
       })
-      .then((slug: string) => {
+      .then((newSlug: string) => {
         dispatch(
           notifSend({
             message: {
@@ -768,8 +814,14 @@ export function persistEntry(collection: Collection) {
         if (assetProxies.length > 0) {
           dispatch(loadMedia());
         }
-        dispatch(entryPersisted(collection, serializedEntry, slug));
-        if (serializedEntry.get('newRecord')) return dispatch(loadEntry(collection, slug));
+        dispatch(entryPersisted(collection, serializedEntry, newSlug));
+        if (collection.has('nested')) {
+          dispatch(loadEntries(collection));
+        }
+        if (entry.get('slug') !== newSlug) {
+          dispatch(loadEntry(collection, newSlug));
+          navigateToEntry(collection.get('name'), newSlug);
+        }
       })
       .catch((error: Error) => {
         console.error(error);
@@ -814,4 +866,54 @@ export function deleteEntry(collection: Collection, slug: string) {
         return Promise.reject(dispatch(entryDeleteFail(collection, slug, error)));
       });
   };
+}
+
+const getPathError = (
+  path: string | undefined,
+  key: string,
+  t: (key: string, args: Record<string, unknown>) => string,
+) => {
+  return {
+    error: {
+      type: ValidationErrorTypes.CUSTOM,
+      message: t(`editor.editorControlPane.widget.${key}`, {
+        path,
+      }),
+    },
+  };
+};
+
+export function validateMetaField(
+  state: State,
+  collection: Collection,
+  field: EntryField,
+  value: string | undefined,
+  t: (key: string, args: Record<string, unknown>) => string,
+) {
+  if (field.get('meta') && field.get('name') === 'path') {
+    if (!value) {
+      return getPathError(value, 'invalidPath', t);
+    }
+    const sanitizedPath = (value as string)
+      .split('/')
+      .map(getProcessSegment(state.config.get('slug')))
+      .join('/');
+
+    if (value !== sanitizedPath) {
+      return getPathError(value, 'invalidPath', t);
+    }
+
+    const customPath = selectCustomPath(collection, fromJS({ entry: { meta: { path: value } } }));
+    const existingEntry = customPath
+      ? selectEntryByPath(state.entries, collection.get('name'), customPath)
+      : undefined;
+
+    const existingEntryPath = existingEntry?.get('path');
+    const draftPath = state.entryDraft?.getIn(['entry', 'path']);
+
+    if (existingEntryPath && existingEntryPath !== draftPath) {
+      return getPathError(value, 'pathExists', t);
+    }
+  }
+  return { error: false };
 }

@@ -27,7 +27,9 @@ import {
   requestWithBackoff,
   unsentRequest,
   ApiRequest,
+  throwOnConflictingBranches,
 } from 'netlify-cms-lib-util';
+import { dirname } from 'path';
 import { Octokit } from '@octokit/rest';
 
 type GitHubUser = Octokit.UsersGetAuthenticatedResponse;
@@ -153,6 +155,24 @@ const getTreeFiles = (files: GitHubCompareFiles) => {
   return treeFiles;
 };
 
+type Diff = {
+  path: string;
+  newFile: boolean;
+  sha: string;
+  binary: boolean;
+};
+
+const diffFromFile = (diff: Octokit.ReposCompareCommitsResponseFilesItem): Diff => {
+  return {
+    path: diff.filename,
+    newFile: diff.status === 'added',
+    sha: diff.sha,
+    // media files diffs don't have a patch attribute, except svg files
+    // renamed files don't have a patch attribute too
+    binary: (diff.status !== 'renamed' && !diff.patch) || diff.filename.endsWith('.svg'),
+  };
+};
+
 let migrationNotified = false;
 
 export default class API {
@@ -202,9 +222,13 @@ export default class API {
 
   user(): Promise<{ name: string; login: string }> {
     if (!this._userPromise) {
-      this._userPromise = this.request('/user') as Promise<GitHubUser>;
+      this._userPromise = this.getUser();
     }
     return this._userPromise;
+  }
+
+  getUser() {
+    return this.request('/user') as Promise<GitHubUser>;
   }
 
   async hasWriteAccess() {
@@ -492,7 +516,9 @@ export default class API {
     // since the contributor doesn't have access to set labels
     // a branch without a pr (or a closed pr) means a 'draft' entry
     // a branch with an opened pr means a 'pending_review' entry
-    const data = await this.getBranch(branch);
+    const data = await this.getBranch(branch).catch(() => {
+      throw new EditorialWorkflowError('content is not under editorial workflow', true);
+    });
     // since we get all (open and closed) pull requests by branch name, make sure to filter by head sha
     const pullRequest = pullRequests.filter(pr => pr.head.sha === data.commit.sha)[0];
     // if no pull request is found for the branch we return a mocked one
@@ -547,65 +573,22 @@ export default class API {
     }
   }
 
-  matchingEntriesFromDiffs(diffs: Octokit.ReposCompareCommitsResponseFilesItem[]) {
-    // media files don't have a patch attribute, except svg files
-    const matchingEntries = diffs
-      .filter(d => d.patch && !d.filename.endsWith('.svg'))
-      .map(f => ({ path: f.filename, newFile: f.status === 'added' }));
-
-    return matchingEntries;
-  }
-
-  async retrieveMetadata(contentKey: string) {
+  async retrieveUnpublishedEntryData(contentKey: string) {
     const { collection, slug } = this.parseContentKey(contentKey);
     const branch = branchFromContentKey(contentKey);
     const pullRequest = await this.getBranchPullRequest(branch);
-    const { files: diffs } = await this.getDifferences(this.branch, pullRequest.head.sha);
-    const matchingEntries = this.matchingEntriesFromDiffs(diffs);
-    let entry = matchingEntries[0];
-    if (matchingEntries.length <= 0) {
-      // this can happen if there is an empty diff for some reason
-      // we traverse the commits history to infer the entry
-      const commits = await this.getPullRequestCommits(pullRequest.number);
-      for (const commit of commits) {
-        const { files: diffs } = await this.getDifferences(this.branch, commit.sha);
-        const matchingEntries = this.matchingEntriesFromDiffs(diffs);
-        entry = matchingEntries[0];
-        if (entry) {
-          break;
-        }
-      }
-      if (!entry) {
-        console.error(
-          'Unable to locate entry from diff',
-          JSON.stringify({ branch, pullRequest, diffs, matchingEntries }),
-        );
-        throw new EditorialWorkflowError('content is not under editorial workflow', true);
-      }
-    } else if (matchingEntries.length > 1) {
-      // this only works for folder collections
-      const entryBySlug = matchingEntries.filter(e => e.path.includes(slug))[0];
-      entry = entryBySlug || entry;
-      if (!entryBySlug) {
-        console.warn(
-          `Expected 1 matching entry from diff, but received '${matchingEntries.length}'. Matched '${entry.path}'`,
-          JSON.stringify({ branch, pullRequest, diffs, matchingEntries }),
-        );
-      }
-    }
-
-    const { path, newFile } = entry;
-
-    const mediaFiles = diffs
-      .filter(d => d.filename !== path)
-      .map(({ filename: path, sha: id }) => ({
-        path,
-        id,
-      }));
+    const { files } = await this.getDifferences(this.branch, pullRequest.head.sha);
+    const diffs = files.map(diffFromFile);
     const label = pullRequest.labels.find(l => isCMSLabel(l.name)) as { name: string };
     const status = labelToStatus(label.name);
-    const timeStamp = pullRequest.updated_at;
-    return { branch, collection, slug, path, status, newFile, mediaFiles, timeStamp, pullRequest };
+    const updatedAt = pullRequest.updated_at;
+    return {
+      collection,
+      slug,
+      status,
+      diffs: diffs.map(d => ({ path: d.path, newFile: d.newFile, id: d.sha })),
+      updatedAt,
+    };
   }
 
   async readFile(
@@ -704,45 +687,6 @@ export default class API {
       } else {
         throw err;
       }
-    }
-  }
-
-  async readUnpublishedBranchFile(contentKey: string) {
-    try {
-      const {
-        branch,
-        collection,
-        slug,
-        path,
-        status,
-        newFile,
-        mediaFiles,
-        timeStamp,
-      } = await this.retrieveMetadata(contentKey);
-
-      const repoURL = this.useOpenAuthoring
-        ? `/repos/${contentKey
-            .split('/')
-            .slice(0, 2)
-            .join('/')}`
-        : this.repoURL;
-
-      const fileData = (await this.readFile(path, null, { branch, repoURL })) as string;
-
-      return {
-        slug,
-        metaData: {
-          branch,
-          collection,
-          objects: { entry: { path, mediaFiles } },
-          status,
-          timeStamp,
-        },
-        fileData,
-        isModification: !newFile,
-      };
-    } catch (e) {
-      throw new EditorialWorkflowError('content is not under editorial workflow', true);
     }
   }
 
@@ -1039,23 +983,24 @@ export default class API {
       }
     } else {
       // Entry is already on editorial review workflow - commit to existing branch
-      const { files: diffs } = await this.getDifferences(
+      const { files: diffFiles } = await this.getDifferences(
         this.branch,
         await this.getHeadReference(branch),
       );
 
+      const diffs = diffFiles.map(diffFromFile);
       // mark media files to remove
       const mediaFilesToRemove: { path: string; sha: string | null }[] = [];
-      for (const diff of diffs) {
-        if (!mediaFilesList.some(file => file.path === diff.filename)) {
-          mediaFilesToRemove.push({ path: diff.filename, sha: null });
+      for (const diff of diffs.filter(d => d.binary)) {
+        if (!mediaFilesList.some(file => file.path === diff.path)) {
+          mediaFilesToRemove.push({ path: diff.path, sha: null });
         }
       }
 
       // rebase the branch before applying new changes
       const rebasedHead = await this.rebaseBranch(branch);
       const treeFiles = mediaFilesToRemove.concat(files);
-      const changeTree = await this.updateTree(rebasedHead.sha, treeFiles);
+      const changeTree = await this.updateTree(rebasedHead.sha, treeFiles, branch);
       const commit = await this.commit(options.commitMessage, changeTree);
 
       return this.patchBranch(branch, commit.sha, { force: true });
@@ -1249,8 +1194,45 @@ export default class API {
     return result;
   }
 
-  createBranch(branchName: string, sha: string) {
-    return this.createRef('heads', branchName, sha);
+  async backupBranch(branchName: string) {
+    try {
+      const existingBranch = await this.getBranch(branchName);
+      await this.createBranch(
+        existingBranch.name.replace(
+          new RegExp(`${CMS_BRANCH_PREFIX}/`),
+          `${CMS_BRANCH_PREFIX}_${Date.now()}/`,
+        ),
+        existingBranch.commit.sha,
+      );
+    } catch (e) {
+      console.warn(e);
+    }
+  }
+
+  async createBranch(branchName: string, sha: string) {
+    try {
+      const result = await this.createRef('heads', branchName, sha);
+      return result;
+    } catch (e) {
+      const message = String(e.message || '');
+      if (message === 'Reference update failed') {
+        await throwOnConflictingBranches(branchName, name => this.getBranch(name), API_NAME);
+      } else if (
+        message === 'Reference already exists' &&
+        branchName.startsWith(`${CMS_BRANCH_PREFIX}/`)
+      ) {
+        try {
+          // this can happen if the branch wasn't deleted when the PR was merged
+          // we backup the existing branch just in case and patch it with the new sha
+          await this.backupBranch(branchName);
+          const result = await this.patchBranch(branchName, sha, { force: true });
+          return result;
+        } catch (e) {
+          console.log(e);
+        }
+      }
+      throw e;
+    }
   }
 
   assertCmsBranch(branchName: string) {
@@ -1372,30 +1354,67 @@ export default class API {
     return Promise.resolve(Base64.encode(str));
   }
 
-  uploadBlob(item: { raw?: string; sha?: string; toBase64?: () => Promise<string> }) {
-    const content = result(item, 'toBase64', partial(this.toBase64, item.raw as string));
-
-    return content.then(contentBase64 =>
-      this.request(`${this.repoURL}/git/blobs`, {
-        method: 'POST',
-        body: JSON.stringify({
-          content: contentBase64,
-          encoding: 'base64',
-        }),
-      }).then(response => {
-        item.sha = response.sha;
-        return item;
-      }),
+  async uploadBlob(item: { raw?: string; sha?: string; toBase64?: () => Promise<string> }) {
+    const contentBase64 = await result(
+      item,
+      'toBase64',
+      partial(this.toBase64, item.raw as string),
     );
+    const response = await this.request(`${this.repoURL}/git/blobs`, {
+      method: 'POST',
+      body: JSON.stringify({
+        content: contentBase64,
+        encoding: 'base64',
+      }),
+    });
+    item.sha = response.sha;
+    return item;
   }
 
-  async updateTree(baseSha: string, files: { path: string; sha: string | null }[]) {
-    const tree: TreeEntry[] = files.map(file => ({
-      path: trimStart(file.path, '/'),
-      mode: '100644',
-      type: 'blob',
-      sha: file.sha,
-    }));
+  async updateTree(
+    baseSha: string,
+    files: { path: string; sha: string | null; newPath?: string }[],
+    branch = this.branch,
+  ) {
+    const toMove: { from: string; to: string; sha: string }[] = [];
+    const tree = files.reduce((acc, file) => {
+      const entry = {
+        path: trimStart(file.path, '/'),
+        mode: '100644',
+        type: 'blob',
+        sha: file.sha,
+      } as TreeEntry;
+
+      if (file.newPath) {
+        toMove.push({ from: file.path, to: file.newPath, sha: file.sha as string });
+      } else {
+        acc.push(entry);
+      }
+
+      return acc;
+    }, [] as TreeEntry[]);
+
+    for (const { from, to, sha } of toMove) {
+      const sourceDir = dirname(from);
+      const destDir = dirname(to);
+      const files = await this.listFiles(sourceDir, { branch, depth: 100 });
+      for (const file of files) {
+        // delete current path
+        tree.push({
+          path: file.path,
+          mode: '100644',
+          type: 'blob',
+          sha: null,
+        });
+        // create in new path
+        tree.push({
+          path: file.path.replace(sourceDir, destDir),
+          mode: '100644',
+          type: 'blob',
+          sha: file.path === from ? sha : file.id,
+        });
+      }
+    }
 
     const newTree = await this.createTree(baseSha, tree);
     return { ...newTree, parentSha: baseSha };
@@ -1430,5 +1449,12 @@ export default class API {
       },
     );
     return result;
+  }
+
+  async getUnpublishedEntrySha(collection: string, slug: string) {
+    const contentKey = this.generateContentKey(collection, slug);
+    const branch = branchFromContentKey(contentKey);
+    const pullRequest = await this.getBranchPullRequest(branch);
+    return pullRequest.head.sha;
   }
 }

@@ -247,6 +247,7 @@ class EditorToolbar extends React.Component {
     deployPreview: ImmutablePropTypes.map,
     loadDeployPreview: PropTypes.func.isRequired,
     t: PropTypes.func.isRequired,
+    editorBackLink: PropTypes.string.isRequired,
   };
 
   componentDidMount() {
@@ -564,11 +565,20 @@ class EditorToolbar extends React.Component {
   };
 
   render() {
-    const { user, hasChanged, displayUrl, collection, hasWorkflow, onLogoutClick, t } = this.props;
+    const {
+      user,
+      hasChanged,
+      displayUrl,
+      collection,
+      hasWorkflow,
+      onLogoutClick,
+      t,
+      editorBackLink,
+    } = this.props;
 
     return (
       <ToolbarContainer>
-        <ToolbarSectionBackLink to={`/collections/${collection.get('name')}`}>
+        <ToolbarSectionBackLink to={editorBackLink}>
           <BackArrow>←</BackArrow>
           <div>
             <BackCollection>

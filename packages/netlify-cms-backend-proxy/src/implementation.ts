@@ -9,6 +9,7 @@ import {
   EditorialWorkflowError,
   APIError,
   unsentRequest,
+  UnpublishedEntry,
 } from 'netlify-cms-lib-util';
 import AuthenticationPage from './AuthenticationPage';
 
@@ -61,6 +62,10 @@ export default class ProxyBackend implements Implementation {
 
   isGitBackend() {
     return false;
+  }
+
+  status() {
+    return Promise.resolve({ auth: { status: true }, api: { status: true, statusPage: '' } });
   }
 
   authComponent() {
@@ -127,21 +132,44 @@ export default class ProxyBackend implements Implementation {
     });
   }
 
-  async unpublishedEntry(collection: string, slug: string) {
+  async unpublishedEntry({
+    id,
+    collection,
+    slug,
+  }: {
+    id?: string;
+    collection?: string;
+    slug?: string;
+  }) {
     try {
-      const entry = await this.request({
+      const entry: UnpublishedEntry = await this.request({
         action: 'unpublishedEntry',
-        params: { branch: this.branch, collection, slug },
+        params: { branch: this.branch, id, collection, slug },
       });
 
-      const mediaFiles = entry.mediaFiles.map(deserializeMediaFile);
-      return { ...entry, mediaFiles };
+      return entry;
     } catch (e) {
       if (e.status === 404) {
         throw new EditorialWorkflowError('content is not under editorial workflow', true);
       }
       throw e;
     }
+  }
+
+  async unpublishedEntryDataFile(collection: string, slug: string, path: string, id: string) {
+    const { data } = await this.request({
+      action: 'unpublishedEntryDataFile',
+      params: { branch: this.branch, collection, slug, path, id },
+    });
+    return data;
+  }
+
+  async unpublishedEntryMediaFile(collection: string, slug: string, path: string, id: string) {
+    const file = await this.request({
+      action: 'unpublishedEntryMediaFile',
+      params: { branch: this.branch, collection, slug, path, id },
+    });
+    return deserializeMediaFile(file);
   }
 
   deleteUnpublishedEntry(collection: string, slug: string) {

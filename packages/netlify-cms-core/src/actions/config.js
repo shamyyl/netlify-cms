@@ -1,6 +1,6 @@
 import yaml from 'yaml';
 import { Map, fromJS } from 'immutable';
-import { trimStart, get, isPlainObject } from 'lodash';
+import { trimStart, trim, get, isPlainObject } from 'lodash';
 import { authenticateUser } from 'Actions/auth';
 import * as publishModes from 'Constants/publishModes';
 import { validateConfig } from 'Constants/configSchema';
@@ -82,11 +82,28 @@ export function applyDefaults(config) {
               'fields',
               traverseFields(collection.get('fields'), setDefaultPublicFolder),
             );
-            collection = collection.set('folder', trimStart(folder, '/'));
+            collection = collection.set('folder', trim(folder, '/'));
+            if (collection.has('meta')) {
+              const fields = collection.get('fields');
+              const metaFields = [];
+              collection.get('meta').forEach((value, key) => {
+                const field = value.withMutations(map => {
+                  map.set('name', key);
+                  map.set('meta', true);
+                  map.set('required', true);
+                });
+                metaFields.push(field);
+              });
+              collection = collection.set('fields', fromJS([]).concat(metaFields, fields));
+            } else {
+              collection = collection.set('meta', Map());
+            }
           }
 
           const files = collection.get('files');
           if (files) {
+            collection = collection.delete('nested');
+            collection = collection.delete('meta');
             collection = collection.set(
               'files',
               files.map(file => {
@@ -105,6 +122,17 @@ export function applyDefaults(config) {
             const backend = resolveBackend(config);
             const defaultSortable = selectDefaultSortableFields(collection, backend);
             collection = collection.set('sortableFields', fromJS(defaultSortable));
+          }
+
+          if (!collection.has('view_filters')) {
+            collection = collection.set('view_filters', fromJS([]));
+          } else {
+            collection = collection.set(
+              'view_filters',
+              collection
+                .get('view_filters')
+                .map(v => v.set('id', `${v.get('field')}__${v.get('pattern')}`)),
+            );
           }
 
           return collection;
@@ -175,12 +203,14 @@ export function mergeConfig(config) {
 }
 
 export async function detectProxyServer(localBackend) {
-  if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+  const allowedHosts = ['localhost', '127.0.0.1', ...(localBackend?.allowed_hosts || [])];
+  if (allowedHosts.includes(location.hostname)) {
     let proxyUrl;
+    const defaultUrl = 'http://localhost:8081/api/v1';
     if (localBackend === true) {
-      proxyUrl = 'http://localhost:8081/api/v1';
+      proxyUrl = defaultUrl;
     } else if (isPlainObject(localBackend)) {
-      proxyUrl = localBackend.url;
+      proxyUrl = localBackend.url || defaultUrl.replace('localhost', location.hostname);
     }
     try {
       console.log(`Looking for Netlify CMS Proxy Server at '${proxyUrl}'`);

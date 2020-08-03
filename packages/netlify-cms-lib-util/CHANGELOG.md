@@ -3,6 +3,55 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## 2.11.1 (2020-07-27)
+
+
+### Reverts
+
+* Revert "chore(release): publish" ([118d50a](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-lib-util/commit/118d50a7a70295f25073e564b5161aa2b9883056))
+
+
+
+
+
+# [2.11.0](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-lib-util/compare/netlify-cms-lib-util@2.10.0...netlify-cms-lib-util@2.11.0) (2020-06-18)
+
+
+### Bug Fixes
+
+* handle token expiry ([#3847](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-lib-util/issues/3847)) ([285c940](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-lib-util/commit/285c940562548d7bc88de244123ba87ff66fba65))
+
+
+### Features
+
+* add backend status down indicator ([#3889](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-lib-util/issues/3889)) ([a50edc7](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-lib-util/commit/a50edc70553ad6afa1acee6a51996ad226443f8c))
+
+
+
+
+
+# [2.10.0](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-lib-util/compare/netlify-cms-lib-util@2.9.4...netlify-cms-lib-util@2.10.0) (2020-06-01)
+
+
+### Features
+
+* add pre save/ post save hooks ([#3812](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-lib-util/issues/3812)) ([812716e](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-lib-util/commit/812716e18b09a716547f128b783c8e6f3d54cc5b))
+
+
+
+
+
+## [2.9.4](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-lib-util/compare/netlify-cms-lib-util@2.9.3...netlify-cms-lib-util@2.9.4) (2020-05-19)
+
+
+### Bug Fixes
+
+* clear fetch timeout on successful response ([#3768](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-lib-util/issues/3768)) ([088b1a8](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-lib-util/commit/088b1a8ab626498382d6305fa46d174d4f5ba755))
+
+
+
+
+
 ## [2.9.3](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-lib-util/compare/netlify-cms-lib-util@2.9.2...netlify-cms-lib-util@2.9.3) (2020-04-21)
 
 **Note:** Version bump only for package netlify-cms-lib-util

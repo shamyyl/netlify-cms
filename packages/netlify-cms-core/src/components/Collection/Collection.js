@@ -4,17 +4,17 @@ import ImmutablePropTypes from 'react-immutable-proptypes';
 import styled from '@emotion/styled';
 import { connect } from 'react-redux';
 import { translate } from 'react-polyglot';
-import { lengths } from 'netlify-cms-ui-default';
+import { lengths, components } from 'netlify-cms-ui-default';
 import { getNewEntryUrl } from 'Lib/urlHelper';
 import Sidebar from './Sidebar';
 import CollectionTop from './CollectionTop';
 import EntriesCollection from './Entries/EntriesCollection';
 import EntriesSearch from './Entries/EntriesSearch';
 import CollectionControls from './CollectionControls';
-import { sortByField } from 'Actions/entries';
-import { selectSortableFields } from 'Reducers/collections';
-import { selectEntriesSort } from 'Reducers/entries';
-import { VIEW_STYLE_LIST } from 'Constants/collectionViews';
+import { sortByField, filterByField } from '../../actions/entries';
+import { selectSortableFields, selectViewFilters } from '../../reducers/collections';
+import { selectEntriesSort, selectEntriesFilter } from '../../reducers/entries';
+import { VIEW_STYLE_LIST } from '../../constants/collectionViews';
 
 const CollectionContainer = styled.div`
   margin: ${lengths.pageMargin};
@@ -24,11 +24,21 @@ const CollectionMain = styled.main`
   padding-left: 280px;
 `;
 
-class Collection extends React.Component {
+const SearchResultContainer = styled.div`
+  ${components.cardTop};
+  margin-bottom: 22px;
+`;
+
+const SearchResultHeading = styled.h1`
+  ${components.cardTopHeading};
+`;
+
+export class Collection extends React.Component {
   static propTypes = {
     searchTerm: PropTypes.string,
     collectionName: PropTypes.string,
     isSearchResults: PropTypes.bool,
+    isSingleSearchResult: PropTypes.bool,
     collection: ImmutablePropTypes.map.isRequired,
     collections: ImmutablePropTypes.orderedMap.isRequired,
     sortableFields: PropTypes.array,
@@ -41,13 +51,24 @@ class Collection extends React.Component {
   };
 
   renderEntriesCollection = () => {
-    const { collection } = this.props;
-    return <EntriesCollection collection={collection} viewStyle={this.state.viewStyle} />;
+    const { collection, filterTerm } = this.props;
+    return (
+      <EntriesCollection
+        collection={collection}
+        viewStyle={this.state.viewStyle}
+        filterTerm={filterTerm}
+      />
+    );
   };
 
   renderEntriesSearch = () => {
-    const { searchTerm, collections } = this.props;
-    return <EntriesSearch collections={collections} searchTerm={searchTerm} />;
+    const { searchTerm, collections, collection, isSingleSearchResult } = this.props;
+    return (
+      <EntriesSearch
+        collections={isSingleSearchResult ? collections.filter(c => c === collection) : collections}
+        searchTerm={searchTerm}
+      />
+    );
   };
 
   handleChangeViewStyle = viewStyle => {
@@ -62,26 +83,57 @@ class Collection extends React.Component {
       collections,
       collectionName,
       isSearchResults,
+      isSingleSearchResult,
       searchTerm,
       sortableFields,
       onSortClick,
       sort,
+      viewFilters,
+      filterTerm,
+      t,
+      onFilterClick,
+      filter,
     } = this.props;
-    const newEntryUrl = collection.get('create') ? getNewEntryUrl(collectionName) : '';
+
+    let newEntryUrl = collection.get('create') ? getNewEntryUrl(collectionName) : '';
+    if (newEntryUrl && filterTerm) {
+      newEntryUrl = getNewEntryUrl(collectionName);
+      if (filterTerm) {
+        newEntryUrl = `${newEntryUrl}?path=${filterTerm}`;
+      }
+    }
+
+    const searchResultKey =
+      'collection.collectionTop.searchResults' + (isSingleSearchResult ? 'InCollection' : '');
+
     return (
       <CollectionContainer>
-        <Sidebar collections={collections} searchTerm={searchTerm} />
+        <Sidebar
+          collections={collections}
+          collection={(!isSearchResults || isSingleSearchResult) && collection}
+          searchTerm={searchTerm}
+          filterTerm={filterTerm}
+        />
         <CollectionMain>
-          {isSearchResults ? null : (
+          {isSearchResults ? (
+            <SearchResultContainer>
+              <SearchResultHeading>
+                {t(searchResultKey, { searchTerm, collection: collection.get('label') })}
+              </SearchResultHeading>
+            </SearchResultContainer>
+          ) : (
             <>
               <CollectionTop collection={collection} newEntryUrl={newEntryUrl} />
               <CollectionControls
-                collection={collection}
                 viewStyle={this.state.viewStyle}
                 onChangeViewStyle={this.handleChangeViewStyle}
                 sortableFields={sortableFields}
                 onSortClick={onSortClick}
                 sort={sort}
+                viewFilters={viewFilters}
+                t={t}
+                onFilterClick={onFilterClick}
+                filter={filter}
               />
             </>
           )}
@@ -95,10 +147,12 @@ class Collection extends React.Component {
 function mapStateToProps(state, ownProps) {
   const { collections } = state;
   const { isSearchResults, match, t } = ownProps;
-  const { name, searchTerm } = match.params;
+  const { name, searchTerm = '', filterTerm = '' } = match.params;
   const collection = name ? collections.get(name) : collections.first();
   const sort = selectEntriesSort(state.entries, collection.get('name'));
   const sortableFields = selectSortableFields(collection, t);
+  const viewFilters = selectViewFilters(collection);
+  const filter = selectEntriesFilter(state.entries, collection.get('name'));
 
   return {
     collection,
@@ -106,13 +160,17 @@ function mapStateToProps(state, ownProps) {
     collectionName: name,
     isSearchResults,
     searchTerm,
+    filterTerm,
     sort,
     sortableFields,
+    viewFilters,
+    filter,
   };
 }
 
 const mapDispatchToProps = {
   sortByField,
+  filterByField,
 };
 
 const mergeProps = (stateProps, dispatchProps, ownProps) => {
@@ -121,6 +179,7 @@ const mergeProps = (stateProps, dispatchProps, ownProps) => {
     ...ownProps,
     onSortClick: (key, direction) =>
       dispatchProps.sortByField(stateProps.collection, key, direction),
+    onFilterClick: filter => dispatchProps.filterByField(stateProps.collection, filter),
   };
 };
 

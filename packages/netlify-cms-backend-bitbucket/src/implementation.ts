@@ -23,7 +23,6 @@ import {
   Config,
   ImplementationFile,
   unpublishedEntries,
-  UnpublishedEntryMediaFile,
   runWithLock,
   AsyncLock,
   asyncLock,
@@ -37,6 +36,8 @@ import {
   generateContentKey,
   localForage,
   allEntriesByFolder,
+  AccessTokenError,
+  branchFromContentKey,
 } from 'netlify-cms-lib-util';
 import { NetlifyAuthenticator } from 'netlify-cms-lib-auth';
 import AuthenticationPage from './AuthenticationPage';
@@ -44,6 +45,15 @@ import API, { API_NAME } from './API';
 import { GitLfsClient } from './git-lfs-client';
 
 const MAX_CONCURRENT_DOWNLOADS = 10;
+
+const STATUS_PAGE = 'https://bitbucket.status.atlassian.com';
+const BITBUCKET_STATUS_ENDPOINT = `${STATUS_PAGE}/api/v2/components.json`;
+const BITBUCKET_OPERATIONAL_UNITS = ['API', 'Authentication and user management', 'Git LFS'];
+type BitbucketStatusComponent = {
+  id: string;
+  name: string;
+  status: string;
+};
 
 // Implementation wrapper class
 export default class BitbucketBackend implements Implementation {
@@ -66,12 +76,12 @@ export default class BitbucketBackend implements Implementation {
   refreshToken?: string;
   refreshedTokenPromise?: Promise<string>;
   authenticator?: NetlifyAuthenticator;
-  auth?: unknown;
   _mediaDisplayURLSem?: Semaphore;
   squashMerges: boolean;
   previewContext: string;
   largeMediaURL: string;
   _largeMediaClientPromise?: Promise<GitLfsClient>;
+  authType: string;
 
   constructor(config: Config, options = {}) {
     this.options = {
@@ -105,10 +115,44 @@ export default class BitbucketBackend implements Implementation {
     this.squashMerges = config.backend.squash_merges || false;
     this.previewContext = config.backend.preview_context || '';
     this.lock = asyncLock();
+    this.authType = config.backend.auth_type || '';
   }
 
   isGitBackend() {
     return true;
+  }
+
+  async status() {
+    const api = await fetch(BITBUCKET_STATUS_ENDPOINT)
+      .then(res => res.json())
+      .then(res => {
+        return res['components']
+          .filter((statusComponent: BitbucketStatusComponent) =>
+            BITBUCKET_OPERATIONAL_UNITS.includes(statusComponent.name),
+          )
+          .every(
+            (statusComponent: BitbucketStatusComponent) => statusComponent.status === 'operational',
+          );
+      })
+      .catch(e => {
+        console.warn('Failed getting BitBucket status', e);
+        return true;
+      });
+
+    let auth = false;
+    // no need to check auth if api is down
+    if (api) {
+      auth =
+        (await this.api
+          ?.user()
+          .then(user => !!user)
+          .catch(e => {
+            console.warn('Failed getting Bitbucket user', e);
+            return false;
+          })) || false;
+    }
+
+    return { auth: { status: auth }, api: { status: api, statusPage: STATUS_PAGE } };
   }
 
   authComponent() {
@@ -180,12 +224,15 @@ export default class BitbucketBackend implements Implementation {
   }
 
   getRefreshedAccessToken() {
+    if (this.authType === 'implicit') {
+      throw new AccessTokenError(`Can't refresh access token when using implicit auth`);
+    }
     if (this.refreshedTokenPromise) {
       return this.refreshedTokenPromise;
     }
 
     // instantiating a new Authenticator on each refresh isn't ideal,
-    if (!this.auth) {
+    if (!this.authenticator) {
       const cfg = {
         // eslint-disable-next-line @typescript-eslint/camelcase
         base_url: this.baseUrl,
@@ -252,7 +299,7 @@ export default class BitbucketBackend implements Implementation {
     let cursor: Cursor;
 
     const listFiles = () =>
-      this.api!.listFiles(folder, depth).then(({ entries, cursor: c }) => {
+      this.api!.listFiles(folder, depth, 20, this.branch).then(({ entries, cursor: c }) => {
         cursor = c.mergeMeta({ extension });
         return entries.filter(e => filterByExtension(e, extension));
       });
@@ -276,7 +323,7 @@ export default class BitbucketBackend implements Implementation {
   }
 
   async listAllFiles(folder: string, extension: string, depth: number) {
-    const files = await this.api!.listAllFiles(folder, depth);
+    const files = await this.api!.listAllFiles(folder, depth, this.branch);
     const filtered = files.filter(file => filterByExtension(file, extension));
     return filtered;
   }
@@ -324,7 +371,7 @@ export default class BitbucketBackend implements Implementation {
   }
 
   getMedia(mediaFolder = this.mediaFolder) {
-    return this.api!.listAllFiles(mediaFolder).then(files =>
+    return this.api!.listAllFiles(mediaFolder, 1, this.branch).then(files =>
       files.map(({ id, name, path }) => ({ id, name, path, displayURL: { id, path } })),
     );
   }
@@ -462,31 +509,26 @@ export default class BitbucketBackend implements Implementation {
     });
   }
 
-  loadMediaFile(branch: string, file: UnpublishedEntryMediaFile) {
-    const readFile = (
+  async loadMediaFile(path: string, id: string, { branch }: { branch: string }) {
+    const readFile = async (
       path: string,
       id: string | null | undefined,
       { parseText }: { parseText: boolean },
-    ) => this.api!.readFile(path, id, { branch, parseText });
-
-    return getMediaAsBlob(file.path, null, readFile).then(blob => {
-      const name = basename(file.path);
-      const fileObj = blobToFileObj(name, blob);
-      return {
-        id: file.path,
-        displayURL: URL.createObjectURL(fileObj),
-        path: file.path,
-        name,
-        size: fileObj.size,
-        file: fileObj,
-      };
-    });
-  }
-
-  async loadEntryMediaFiles(branch: string, files: UnpublishedEntryMediaFile[]) {
-    const mediaFiles = await Promise.all(files.map(file => this.loadMediaFile(branch, file)));
-
-    return mediaFiles;
+    ) => {
+      const content = await this.api!.readFile(path, id, { branch, parseText });
+      return content;
+    };
+    const blob = await getMediaAsBlob(path, id, readFile);
+    const name = basename(path);
+    const fileObj = blobToFileObj(name, blob);
+    return {
+      id: path,
+      displayURL: URL.createObjectURL(fileObj),
+      path,
+      name,
+      size: fileObj.size,
+      file: fileObj,
+    };
   }
 
   async unpublishedEntries() {
@@ -495,37 +537,47 @@ export default class BitbucketBackend implements Implementation {
         branches.map(branch => contentKeyFromBranch(branch)),
       );
 
-    const readUnpublishedBranchFile = (contentKey: string) =>
-      this.api!.readUnpublishedBranchFile(contentKey);
-
-    return unpublishedEntries(listEntriesKeys, readUnpublishedBranchFile, API_NAME);
+    const ids = await unpublishedEntries(listEntriesKeys);
+    return ids;
   }
 
-  async unpublishedEntry(
-    collection: string,
-    slug: string,
-    {
-      loadEntryMediaFiles = (branch: string, files: UnpublishedEntryMediaFile[]) =>
-        this.loadEntryMediaFiles(branch, files),
-    } = {},
-  ) {
+  async unpublishedEntry({
+    id,
+    collection,
+    slug,
+  }: {
+    id?: string;
+    collection?: string;
+    slug?: string;
+  }) {
+    if (id) {
+      const data = await this.api!.retrieveUnpublishedEntryData(id);
+      return data;
+    } else if (collection && slug) {
+      const entryId = generateContentKey(collection, slug);
+      const data = await this.api!.retrieveUnpublishedEntryData(entryId);
+      return data;
+    } else {
+      throw new Error('Missing unpublished entry id or collection and slug');
+    }
+  }
+
+  getBranch(collection: string, slug: string) {
     const contentKey = generateContentKey(collection, slug);
-    const data = await this.api!.readUnpublishedBranchFile(contentKey);
-    const mediaFiles = await loadEntryMediaFiles(
-      data.metaData.branch,
-      // TODO: fix this
-      // eslint-disable-next-line @typescript-eslint/ban-ts-ignore
-      // @ts-ignore
-      data.metaData.objects.entry.mediaFiles,
-    );
-    return {
-      slug,
-      file: { path: data.metaData.objects.entry.path, id: null },
-      data: data.fileData as string,
-      metaData: data.metaData,
-      mediaFiles,
-      isModification: data.isModification,
-    };
+    const branch = branchFromContentKey(contentKey);
+    return branch;
+  }
+
+  async unpublishedEntryDataFile(collection: string, slug: string, path: string, id: string) {
+    const branch = this.getBranch(collection, slug);
+    const data = (await this.api!.readFile(path, id, { branch })) as string;
+    return data;
+  }
+
+  async unpublishedEntryMediaFile(collection: string, slug: string, path: string, id: string) {
+    const branch = this.getBranch(collection, slug);
+    const mediaFile = await this.loadMediaFile(path, id, { branch });
+    return mediaFile;
   }
 
   async updateUnpublishedEntryStatus(collection: string, slug: string, newStatus: string) {

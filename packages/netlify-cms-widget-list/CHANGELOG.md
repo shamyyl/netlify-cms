@@ -3,6 +3,62 @@
 All notable changes to this project will be documented in this file.
 See [Conventional Commits](https://conventionalcommits.org) for commit guidelines.
 
+## 2.6.2 (2020-07-27)
+
+
+### Reverts
+
+* Revert "chore(release): publish" ([118d50a](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-list/commit/118d50a7a70295f25073e564b5161aa2b9883056))
+
+
+
+
+
+## [2.6.1](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-list/compare/netlify-cms-widget-list@2.6.0...netlify-cms-widget-list@2.6.1) (2020-07-16)
+
+
+### Bug Fixes
+
+* **prop-types:** check for react components via PropTypes.elementType ([#4025](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-list/issues/4025)) ([d3831b1](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-list/commit/d3831b1ed44fcff51a63f6645a5aa68332467dab))
+
+
+
+
+
+# [2.6.0](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-list/compare/netlify-cms-widget-list@2.5.1...netlify-cms-widget-list@2.6.0) (2020-06-18)
+
+
+### Features
+
+* add widgets schema validation ([#3841](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-list/issues/3841)) ([2b46608](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-list/commit/2b46608f86d22c8ad34f75e396be7c34462d9e99))
+
+
+
+
+
+## [2.5.1](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-list/compare/netlify-cms-widget-list@2.5.0...netlify-cms-widget-list@2.5.1) (2020-06-01)
+
+
+### Bug Fixes
+
+* Error UI improvements for nested lists/objects ([#3726](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-list/issues/3726)) ([3978578](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-list/commit/397857855b2c8514c2f7ce83756af6b6698abc3d))
+
+
+
+
+
+# [2.5.0](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-list/compare/netlify-cms-widget-list@2.4.6...netlify-cms-widget-list@2.5.0) (2020-05-19)
+
+
+### Features
+
+* **netlify-cms-widget-list:** allow 'summary' field ([#3616](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-list/issues/3616)) ([7cc4c89](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-list/commit/7cc4c89539ddbd410ec7a1767c66f04e8d711cc5))
+* **widget-list:** add hiding list content with minimize_collapsed option ([#3607](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-list/issues/3607)) ([4dd58c5](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-list/commit/4dd58c5dcb22f4c0456a36d6c38883b54d8a7c4d))
+
+
+
+
+
 ## [2.4.6](https://github.com/netlify/netlify-cms/tree/master/packages/netlify-cms-widget-list/compare/netlify-cms-widget-list@2.4.4...netlify-cms-widget-list@2.4.6) (2020-05-04)
 
 **Note:** Version bump only for package netlify-cms-widget-list

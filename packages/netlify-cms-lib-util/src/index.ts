@@ -1,6 +1,7 @@
 import APIError from './APIError';
 import Cursor, { CURSOR_COMPATIBILITY_SYMBOL } from './Cursor';
 import EditorialWorkflowError, { EDITORIAL_WORKFLOW_ERROR } from './EditorialWorkflowError';
+import AccessTokenError from './AccessTokenError';
 import localForage from './localForage';
 import { isAbsolutePath, basename, fileExtensionWithSeparator, fileExtension } from './path';
 import { onlySuccessfulPromises, flowAsync, then } from './promise';
@@ -19,6 +20,7 @@ import { asyncLock, AsyncLock as AL } from './asyncLock';
 import {
   Implementation as I,
   ImplementationEntry as IE,
+  UnpublishedEntry as UE,
   ImplementationMediaFile as IMF,
   ImplementationFile as IF,
   DisplayURLObject as DUO,
@@ -48,6 +50,7 @@ import {
   FetchError as FE,
   ApiRequest as AR,
   requestWithBackoff,
+  throwOnConflictingBranches,
 } from './API';
 import {
   CMS_BRANCH_PREFIX,
@@ -73,6 +76,7 @@ import {
 export type AsyncLock = AL;
 export type Implementation = I;
 export type ImplementationEntry = IE;
+export type UnpublishedEntry = UE;
 export type ImplementationMediaFile = IMF;
 export type ImplementationFile = IF;
 export type DisplayURL = DU;
@@ -138,6 +142,8 @@ export const NetlifyCmsLibUtil = {
   blobToFileObj,
   requestWithBackoff,
   allEntriesByFolder,
+  AccessTokenError,
+  throwOnConflictingBranches,
 };
 export {
   APIError,
@@ -192,4 +198,6 @@ export {
   blobToFileObj,
   requestWithBackoff,
   allEntriesByFolder,
+  AccessTokenError,
+  throwOnConflictingBranches,
 };

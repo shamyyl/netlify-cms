@@ -34,7 +34,9 @@ const en = {
   collection: {
     sidebar: {
       collections: 'Collections',
+      allCollections: 'All Collections',
       searchAll: 'Search all',
+      searchIn: 'Search in',
     },
     collectionTop: {
       sortBy: 'Sort by',
@@ -42,6 +44,9 @@ const en = {
       newButton: 'New %{collectionLabel}',
       ascending: 'Ascending',
       descending: 'Descending',
+      searchResults: 'Search Results for "%{searchTerm}"',
+      searchResultsInCollection: 'Search Results for "%{searchTerm}" in %{collection}',
+      filterBy: 'Filter by',
     },
     entries: {
       loadingEntries: 'Loading Entries...',
@@ -76,6 +81,8 @@ const en = {
         rangeCountExact: '%{fieldLabel} must have exactly %{count} item(s).',
         minCount: '%{fieldLabel} must be at least %{minCount} item(s).',
         maxCount: '%{fieldLabel} must be %{maxCount} or less item(s).',
+        invalidPath: `'%{path}' is not a valid path`,
+        pathExists: `Path '%{path}' already exists`,
       },
     },
     editor: {
@@ -218,6 +225,9 @@ const en = {
       entryUpdated: 'Entry status updated',
       onDeleteUnpublishedChanges: 'Unpublished changes deleted',
       onFailToAuth: '%{details}',
+      onLoggedOut: 'You have been logged out, please back up any data and login again',
+      onBackendDown:
+        'The backend service is experiencing an outage. See %{details} for more information',
     },
   },
   workflow: {

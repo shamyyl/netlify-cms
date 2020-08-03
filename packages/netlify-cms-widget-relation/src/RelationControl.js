@@ -2,10 +2,33 @@ import React from 'react';
 import PropTypes from 'prop-types';
 import ImmutablePropTypes from 'react-immutable-proptypes';
 import { Async as AsyncSelect } from 'react-select';
-import { find, isEmpty, last, debounce } from 'lodash';
+import { find, isEmpty, last, debounce, get, uniqBy, sortBy } from 'lodash';
 import { List, Map, fromJS } from 'immutable';
 import { reactSelectStyles } from 'netlify-cms-ui-default';
 import { stringTemplate } from 'netlify-cms-lib-widgets';
+import { FixedSizeList } from 'react-window';
+
+const Option = ({ index, style, data }) => <div style={style}>{data.options[index]}</div>;
+
+const MenuList = props => {
+  if (props.isLoading || props.options.length <= 0 || !Array.isArray(props.children)) {
+    return props.children;
+  }
+  const rows = props.children;
+  const itemSize = 30;
+  return (
+    <FixedSizeList
+      style={{ width: '100%' }}
+      width={300}
+      height={Math.min(300, rows.length * itemSize + itemSize / 3)}
+      itemCount={rows.length}
+      itemSize={itemSize}
+      itemData={{ options: rows }}
+    >
+      {Option}
+    </FixedSizeList>
+  );
+};
 
 function optionToString(option) {
   return option && option.value ? option.value : '';
@@ -18,18 +41,32 @@ function convertToOption(raw) {
   return Map.isMap(raw) ? raw.toJS() : raw;
 }
 
+function getSelectedOptions(value) {
+  const selectedOptions = List.isList(value) ? value.toJS() : value;
+
+  if (!selectedOptions || !Array.isArray(selectedOptions)) {
+    return null;
+  }
+
+  return selectedOptions;
+}
+
+function uniqOptions(initial, current) {
+  return uniqBy(initial.concat(current), o => o.value);
+}
+
 function getSelectedValue({ value, options, isMultiple }) {
   if (isMultiple) {
-    const selectedOptions = List.isList(value) ? value.toJS() : value;
-
-    if (!selectedOptions || !Array.isArray(selectedOptions)) {
+    const selectedOptions = getSelectedOptions(value);
+    if (selectedOptions === null) {
       return null;
     }
 
-    return selectedOptions
+    const selected = selectedOptions
       .map(i => options.find(o => o.value === (i.value || i)))
       .filter(Boolean)
       .map(convertToOption);
+    return selected;
   } else {
     return find(options, ['value', value]) || null;
   }
@@ -37,6 +74,11 @@ function getSelectedValue({ value, options, isMultiple }) {
 
 export default class RelationControl extends React.Component {
   didInitialSearch = false;
+  mounted = false;
+
+  state = {
+    initialOptions: [],
+  };
 
   static propTypes = {
     onChange: PropTypes.func.isRequired,
@@ -57,6 +99,39 @@ export default class RelationControl extends React.Component {
       this.props.hasActiveStyle !== nextProps.hasActiveStyle ||
       this.props.queryHits !== nextProps.queryHits
     );
+  }
+
+  async componentDidMount() {
+    this.mounted = true;
+    // if the field has a previous value perform an initial search based on the value field
+    // this is required since each search is limited by optionsLength so the selected value
+    // might not show up on the search
+    const { forID, field, value, query } = this.props;
+    const collection = field.get('collection');
+    const file = field.get('file');
+    const initialSearchValues = this.isMultiple() ? getSelectedOptions(value) : [value];
+    if (initialSearchValues && initialSearchValues.length > 0) {
+      const allOptions = await Promise.all(
+        initialSearchValues.map((v, index) => {
+          return query(forID, collection, [field.get('valueField')], v, file, 1).then(
+            ({ payload }) => {
+              const hits = payload.response?.hits || [];
+              const options = this.parseHitOptions(hits);
+              return { options, index };
+            },
+          );
+        }),
+      );
+
+      const initialOptions = [].concat(
+        ...sortBy(allOptions, ({ index }) => index).map(({ options }) => options),
+      );
+      this.mounted && this.setState({ initialOptions });
+    }
+  }
+
+  componentWillUnmount() {
+    this.mounted = false;
   }
 
   componentDidUpdate(prevProps) {
@@ -92,6 +167,7 @@ export default class RelationControl extends React.Component {
     let metadata;
 
     if (Array.isArray(selectedOption)) {
+      this.setState({ initialOptions: selectedOption });
       value = selectedOption.map(optionToString);
       metadata =
         (!isEmpty(selectedOption) && {
@@ -104,6 +180,7 @@ export default class RelationControl extends React.Component {
         {};
       onChange(fromJS(value), metadata);
     } else {
+      this.setState({ initialOptions: [selectedOption] });
       value = optionToString(selectedOption);
       metadata = selectedOption && {
         [field.get('name')]: {
@@ -116,36 +193,41 @@ export default class RelationControl extends React.Component {
 
   parseNestedFields = (hit, field) => {
     const templateVars = stringTemplate.extractTemplateVars(field);
-    // wrap non template fields with a template
+    // return non template fields as is
     if (templateVars.length <= 0) {
-      field = `{{fields.${field}}}`;
+      return get(hit.data, field);
     }
     const data = stringTemplate.addFileTemplateFields(hit.path, fromJS(hit.data));
     const value = stringTemplate.compileStringTemplate(field, null, hit.slug, data);
     return value;
   };
 
+  isMultiple() {
+    return this.props.field.get('multiple', false);
+  }
+
   parseHitOptions = hits => {
     const { field } = this.props;
     const valueField = field.get('valueField');
-    const displayField = field.get('displayFields') || field.get('valueField');
-
-    return hits.map(hit => {
-      let labelReturn;
-      if (List.isList(displayField)) {
-        labelReturn = displayField
+    const displayField = field.get('displayFields') || List([field.get('valueField')]);
+    const options = hits.reduce((acc, hit) => {
+      const valuesPaths = stringTemplate.expandPath({ data: hit.data, path: valueField });
+      for (let i = 0; i < valuesPaths.length; i++) {
+        const label = displayField
           .toJS()
-          .map(key => this.parseNestedFields(hit, key))
+          .map(key => {
+            const displayPaths = stringTemplate.expandPath({ data: hit.data, path: key });
+            return this.parseNestedFields(hit, displayPaths[i] || displayPaths[0]);
+          })
           .join(' ');
-      } else {
-        labelReturn = this.parseNestedFields(hit, displayField);
+        const value = this.parseNestedFields(hit, valuesPaths[i]);
+        acc.push({ data: hit.data, value, label });
       }
-      return {
-        data: hit.data,
-        value: this.parseNestedFields(hit, valueField),
-        label: labelReturn,
-      };
-    });
+
+      return acc;
+    }, []);
+
+    return options;
   };
 
   loadOptions = debounce((term, callback) => {
@@ -154,22 +236,13 @@ export default class RelationControl extends React.Component {
     const searchFields = field.get('searchFields');
     const optionsLength = field.get('optionsLength') || 20;
     const searchFieldsArray = List.isList(searchFields) ? searchFields.toJS() : [searchFields];
+    const file = field.get('file');
 
-    query(forID, collection, searchFieldsArray, term).then(({ payload }) => {
-      let options =
-        payload.response && payload.response.hits
-          ? this.parseHitOptions(payload.response.hits)
-          : [];
-
-      if (!this.allOptions && !term) {
-        this.allOptions = options;
-      }
-
-      if (!term) {
-        options = options.slice(0, optionsLength);
-      }
-
-      callback(options);
+    query(forID, collection, searchFieldsArray, term, file, optionsLength).then(({ payload }) => {
+      const hits = payload.response?.hits || [];
+      const options = this.parseHitOptions(hits);
+      const uniq = uniqOptions(this.state.initialOptions, options);
+      callback(uniq);
     });
   }, 500);
 
@@ -183,11 +256,12 @@ export default class RelationControl extends React.Component {
       setInactiveStyle,
       queryHits,
     } = this.props;
-    const isMultiple = field.get('multiple', false);
+    const isMultiple = this.isMultiple();
     const isClearable = !field.get('required', true) || isMultiple;
 
     const hits = queryHits.get(forID, []);
-    const options = this.allOptions || this.parseHitOptions(hits);
+    const queryOptions = this.parseHitOptions(hits);
+    const options = uniqOptions(this.state.initialOptions, queryOptions);
     const selectedValue = getSelectedValue({
       options,
       value,
@@ -196,8 +270,10 @@ export default class RelationControl extends React.Component {
 
     return (
       <AsyncSelect
+        components={{ MenuList }}
         value={selectedValue}
         inputId={forID}
+        cacheOptions
         defaultOptions
         loadOptions={this.loadOptions}
         onChange={this.handleChange}

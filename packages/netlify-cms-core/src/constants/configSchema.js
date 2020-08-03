@@ -1,23 +1,63 @@
 import AJV from 'ajv';
+import { select, uniqueItemProperties, instanceof as instanceOf } from 'ajv-keywords/keywords';
 import ajvErrors from 'ajv-errors';
 import { formatExtensions, frontmatterFormats, extensionFormatters } from 'Formats/formats';
+import { getWidgets } from 'Lib/registry';
 
 /**
  * Config for fields in both file and folder collections.
  */
-const fieldsConfig = {
+const fieldsConfig = () => ({
+  $id: 'fields',
   type: 'array',
   minItems: 1,
   items: {
     // ------- Each field: -------
+    $id: 'field',
     type: 'object',
     properties: {
       name: { type: 'string' },
       label: { type: 'string' },
       widget: { type: 'string' },
       required: { type: 'boolean' },
+      hint: { type: 'string' },
+      pattern: {
+        type: 'array',
+        minItems: 2,
+        items: [{ oneOf: [{ type: 'string' }, { instanceof: 'RegExp' }] }, { type: 'string' }],
+      },
+      field: { $ref: 'field' },
+      fields: { $ref: 'fields' },
+      types: { $ref: 'fields' },
+    },
+    select: { $data: '0/widget' },
+    selectCases: {
+      ...getWidgetSchemas(),
     },
     required: ['name'],
+  },
+  uniqueItemProperties: ['name'],
+});
+
+const viewFilters = {
+  type: 'array',
+  minItems: 1,
+  items: {
+    type: 'object',
+    properties: {
+      label: { type: 'string' },
+      field: { type: 'string' },
+      pattern: {
+        oneOf: [
+          { type: 'boolean' },
+          {
+            type: 'string',
+          },
+        ],
+      },
+    },
+    additionalProperties: false,
+    required: ['label', 'field', 'pattern'],
   },
 };
 
@@ -49,8 +89,12 @@ const getConfigSchema = () => ({
           type: 'object',
           properties: {
             url: { type: 'string', examples: ['http://localhost:8081/api/v1'] },
+            allowed_hosts: {
+              type: 'array',
+              items: { type: 'string' },
+            },
           },
-          required: ['url'],
+          additionalProperties: false,
         },
       ],
     },
@@ -105,10 +149,11 @@ const getConfigSchema = () => ({
                 label_singular: { type: 'string' },
                 description: { type: 'string' },
                 file: { type: 'string' },
-                fields: fieldsConfig,
+                fields: fieldsConfig(),
               },
               required: ['name', 'label', 'file', 'fields'],
             },
+            uniqueItemProperties: ['name'],
           },
           identifier_field: { type: 'string' },
           summary: { type: 'string' },
@@ -135,12 +180,37 @@ const getConfigSchema = () => ({
               type: 'string',
             },
           },
-          fields: fieldsConfig,
+          fields: fieldsConfig(),
           sortableFields: {
             type: 'array',
             items: {
               type: 'string',
             },
+          },
+          view_filters: viewFilters,
+          nested: {
+            type: 'object',
+            properties: {
+              depth: { type: 'number', minimum: 1, maximum: 1000 },
+              summary: { type: 'string' },
+            },
+            required: ['depth'],
+          },
+          meta: {
+            type: 'object',
+            properties: {
+              path: {
+                type: 'object',
+                properties: {
+                  label: { type: 'string' },
+                  widget: { type: 'string' },
+                  index_file: { type: 'string' },
+                },
+                required: ['label', 'widget', 'index_file'],
+              },
+            },
+            additionalProperties: false,
+            minProperties: 1,
           },
         },
         required: ['name', 'label'],
@@ -164,11 +234,17 @@ const getConfigSchema = () => ({
           },
         },
       },
+      uniqueItemProperties: ['name'],
     },
   },
   required: ['backend', 'collections'],
   anyOf: [{ required: ['media_folder'] }, { required: ['media_library'] }],
 });
+
+function getWidgetSchemas() {
+  const schemas = getWidgets().map(widget => ({ [widget.name]: widget.schema }));
+  return Object.assign(...schemas);
+}
 
 class ConfigError extends Error {
   constructor(errors, ...args) {
@@ -199,12 +275,45 @@ class ConfigError extends Error {
  * the config that is passed in.
  */
 export function validateConfig(config) {
-  const ajv = new AJV({ allErrors: true, jsonPointers: true });
+  const ajv = new AJV({ allErrors: true, jsonPointers: true, $data: true });
+  uniqueItemProperties(ajv);
+  select(ajv);
+  instanceOf(ajv);
   ajvErrors(ajv);
 
   const valid = ajv.validate(getConfigSchema(), config);
   if (!valid) {
-    console.error('Config Errors', ajv.errors);
-    throw new ConfigError(ajv.errors);
+    const errors = ajv.errors.map(e => {
+      switch (e.keyword) {
+        // TODO: remove after https://github.com/ajv-validator/ajv-keywords/pull/123 is merged
+        case 'uniqueItemProperties': {
+          const path = e.dataPath || '';
+          let newError = e;
+          if (path.endsWith('/fields')) {
+            newError = { ...e, message: 'fields names must be unique' };
+          } else if (path.endsWith('/files')) {
+            newError = { ...e, message: 'files names must be unique' };
+          } else if (path.endsWith('/collections')) {
+            newError = { ...e, message: 'collections names must be unique' };
+          }
+          return newError;
+        }
+        case 'instanceof': {
+          const path = e.dataPath || '';
+          let newError = e;
+          if (/fields\/\d+\/pattern\/\d+/.test(path)) {
+            newError = {
+              ...e,
+              message: 'should be a regular expression',
+            };
+          }
+          return newError;
+        }
+        default:
+          return e;
+      }
+    });
+    console.error('Config Errors', errors);
+    throw new ConfigError(errors);
   }
 }

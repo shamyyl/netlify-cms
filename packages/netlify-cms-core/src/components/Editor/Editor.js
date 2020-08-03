@@ -34,12 +34,7 @@ import { selectFields } from 'Reducers/collections';
 import { status, EDITORIAL_WORKFLOW } from 'Constants/publishModes';
 import EditorInterface from './EditorInterface';
 import withWorkflow from './withWorkflow';
-
-const navigateCollection = collectionPath => history.push(`/collections/${collectionPath}`);
-const navigateToCollection = collectionName => navigateCollection(collectionName);
-const navigateToNewEntry = collectionName => navigateCollection(`${collectionName}/new`);
-const navigateToEntry = (collectionName, slug) =>
-  navigateCollection(`${collectionName}/entries/${slug}`);
+import { navigateToCollection, navigateToNewEntry } from '../../routing/history';
 
 export class Editor extends React.Component {
   static propTypes = {
@@ -169,16 +164,6 @@ export class Editor extends React.Component {
   }
 
   componentDidUpdate(prevProps) {
-    /**
-     * If the old slug is empty and the new slug is not, a new entry was just
-     * saved, and we need to update navigation to the correct url using the
-     * slug.
-     */
-    const newSlug = this.props.entryDraft && this.props.entryDraft.getIn(['entry', 'slug']);
-    if (!prevProps.slug && newSlug && this.props.newEntry) {
-      navigateToEntry(prevProps.collection.get('name'), newSlug);
-    }
-
     if (!prevProps.localBackup && this.props.localBackup) {
       const confirmLoadBackup = window.confirm(this.props.t('editor.editor.confirmLoadBackup'));
       if (confirmLoadBackup) {
@@ -383,6 +368,7 @@ export class Editor extends React.Component {
       draftKey,
       slug,
       t,
+      editorBackLink,
     } = this.props;
 
     const isPublished = !newEntry && !unpublishedEntry;
@@ -431,6 +417,7 @@ export class Editor extends React.Component {
         onLogoutClick={logoutUser}
         deployPreview={deployPreview}
         loadDeployPreview={opts => loadDeployPreview(collection, slug, entry, isPublished, opts)}
+        editorBackLink={editorBackLink}
       />
     );
   }
@@ -453,10 +440,17 @@ function mapStateToProps(state, ownProps) {
   const collectionEntriesLoaded = !!entries.getIn(['pages', collectionName]);
   const unPublishedEntry = selectUnpublishedEntry(state, collectionName, slug);
   const publishedEntry = selectEntry(state, collectionName, slug);
-  const currentStatus = unPublishedEntry && unPublishedEntry.getIn(['metaData', 'status']);
+  const currentStatus = unPublishedEntry && unPublishedEntry.get('status');
   const deployPreview = selectDeployPreview(state, collectionName, slug);
   const localBackup = entryDraft.get('localBackup');
   const draftKey = entryDraft.get('key');
+  let editorBackLink = `/collections/${collectionName}`;
+  if (collection.has('nested') && slug) {
+    const pathParts = slug.split('/');
+    if (pathParts.length > 2) {
+      editorBackLink = `${editorBackLink}/filter/${pathParts.slice(0, -2).join('/')}`;
+    }
+  }
 
   return {
     collection,
@@ -479,6 +473,7 @@ function mapStateToProps(state, ownProps) {
     draftKey,
     publishedEntry,
     unPublishedEntry,
+    editorBackLink,
   };
 }
 

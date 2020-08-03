@@ -57,6 +57,10 @@ export const commitMessageFormatter = (
         return path || '';
       case 'collection':
         return collection ? collection.get('label_singular') || collection.get('label') : '';
+      case 'author-login':
+        return authorLogin || '';
+      case 'author-name':
+        return authorName || '';
       default:
         console.warn(`Ignoring unknown variable “${variable}” in commit message template.`);
         return '';
@@ -99,7 +103,7 @@ export const prepareSlug = (slug: string) => {
   );
 };
 
-const getProcessSegment = (slugConfig: SlugConfig) =>
+export const getProcessSegment = (slugConfig: SlugConfig) =>
   flow([value => String(value), prepareSlug, partialRight(sanitizeSlug, slugConfig)]);
 
 export const slugFormatter = (
